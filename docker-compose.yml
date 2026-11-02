@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  hub-postgres:
+    image: postgres:16-alpine
+    container_name: crm-hub-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hub_user
+      POSTGRES_PASSWORD: HubPassword123!
+      POSTGRES_DB: hubdb
+    ports:
+      - "5480:5432"
+    volumes:
+      - hub_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hub_user -d hubdb"]
+      interval: 3s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  hub_pgdata:
