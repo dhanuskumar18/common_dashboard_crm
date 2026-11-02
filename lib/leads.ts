@@ -564,4 +564,173 @@ export async function recentTransfers(limit = 15) {
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Audit Logs (hub.lead_transfers + hub.leads pool events)
+// ---------------------------------------------------------------------------
+export interface AuditLog {
+  id: string;
+  action: "assign" | "create" | "delete";
+  leadName: string;
+  fromCompany: string | null;
+  toCompany: string | null;
+  actor: string;
+  timestamp: string;
+  meta: string | null; // extra context string (e.g., new lead code)
+}
+
+export interface AuditLogsParams {
+  page: number;
+  pageSize: number;
+  q: string;
+  action: string; // "assign" | "create" | "delete" | "all"
+  from: string;   // ISO date string or ""
+  to: string;     // ISO date string or ""
+}
+
+export async function getAuditLogs(p: AuditLogsParams) {
+  await ensureHub();
+
+  const label = (k: string | null) =>
+    !k ? null : k === POOL_KEY ? POOL_LABEL : getCompany(k)?.label || k;
+
+  const events: AuditLog[] = [];
+
+  // 1) Lead transfer events (assign / move)
+  if (p.action === "all" || p.action === "assign") {
+    const where: string[] = [];
+    const args: unknown[] = [];
+
+    if (p.q) {
+      args.push(`%${p.q}%`);
+      where.push(`("leadName" ILIKE $${args.length} OR "movedBy" ILIKE $${args.length})`);
+    }
+    if (p.from) {
+      args.push(p.from);
+      where.push(`"movedAt" >= $${args.length}`);
+    }
+    if (p.to) {
+      args.push(p.to);
+      where.push(`"movedAt" <= $${args.length}::date + interval '1 day'`);
+    }
+
+    const sql = `SELECT * FROM hub.lead_transfers${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY "movedAt" DESC LIMIT 2000`;
+    const r = await getPool("hub").query(sql, args);
+    for (const x of r.rows) {
+      events.push({
+        id: x.id as string,
+        action: "assign",
+        leadName: x.leadName as string,
+        fromCompany: label(x.fromCompany as string),
+        toCompany: label(x.toCompany as string),
+        actor: x.movedBy as string,
+        timestamp: iso(x.movedAt),
+        meta: null,
+      });
+    }
+  }
+
+  // 2) Pool create events
+  if (p.action === "all" || p.action === "create") {
+    const where: string[] = [`"deletedAt" IS NULL OR "deletedAt" IS NOT NULL`]; // all pool leads ever created
+    const args: unknown[] = [];
+
+    if (p.q) {
+      args.push(`%${p.q}%`);
+      where.push(`("firstName" ILIKE $${args.length} OR "lastName" ILIKE $${args.length} OR email ILIKE $${args.length})`);
+    }
+    if (p.from) {
+      args.push(p.from);
+      where.push(`"createdAt" >= $${args.length}`);
+    }
+    if (p.to) {
+      args.push(p.to);
+      where.push(`"createdAt" <= $${args.length}::date + interval '1 day'`);
+    }
+
+    const sql = `SELECT id, "firstName", "lastName", email, "createdAt" FROM hub.leads WHERE ${where.join(" AND ")} ORDER BY "createdAt" DESC LIMIT 2000`;
+    const r = await getPool("hub").query(sql, args);
+    for (const x of r.rows) {
+      events.push({
+        id: `create-${x.id as string}`,
+        action: "create",
+        leadName: `${x.firstName as string} ${x.lastName as string}`.trim(),
+        fromCompany: null,
+        toCompany: "Unassigned Pool",
+        actor: "System / API",
+        timestamp: iso(x.createdAt),
+        meta: x.email as string,
+      });
+    }
+  }
+
+  // 3) Pool delete events
+  if (p.action === "all" || p.action === "delete") {
+    const where: string[] = [`"deletedAt" IS NOT NULL`];
+    const args: unknown[] = [];
+
+    if (p.q) {
+      args.push(`%${p.q}%`);
+      where.push(`("firstName" ILIKE $${args.length} OR "lastName" ILIKE $${args.length} OR email ILIKE $${args.length})`);
+    }
+    if (p.from) {
+      args.push(p.from);
+      where.push(`"deletedAt" >= $${args.length}`);
+    }
+    if (p.to) {
+      args.push(p.to);
+      where.push(`"deletedAt" <= $${args.length}::date + interval '1 day'`);
+    }
+
+    const sql = `SELECT id, "firstName", "lastName", email, "deletedAt" FROM hub.leads WHERE ${where.join(" AND ")} ORDER BY "deletedAt" DESC LIMIT 2000`;
+    const r = await getPool("hub").query(sql, args);
+    for (const x of r.rows) {
+      events.push({
+        id: `delete-${x.id as string}`,
+        action: "delete",
+        leadName: `${x.firstName as string} ${x.lastName as string}`.trim(),
+        fromCompany: "Unassigned Pool",
+        toCompany: null,
+        actor: "Admin",
+        timestamp: iso(x.deletedAt),
+        meta: x.email as string,
+      });
+    }
+  }
+
+  // Sort all events by timestamp desc and paginate
+  events.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  const total = events.length;
+  const { page, pageSize } = p;
+
+  // Retrieve global metric counts for audit categories
+  let assignCount = 0;
+  let createCount = 0;
+  let deleteCount = 0;
+  try {
+    const [rTransfers, rCreates, rDeletes] = await Promise.all([
+      getPool("hub").query(`SELECT COUNT(*)::int AS c FROM hub.lead_transfers`),
+      getPool("hub").query(`SELECT COUNT(*)::int AS c FROM hub.leads`),
+      getPool("hub").query(`SELECT COUNT(*)::int AS c FROM hub.leads WHERE "deletedAt" IS NOT NULL`),
+    ]);
+    assignCount = rTransfers.rows[0]?.c ?? 0;
+    createCount = rCreates.rows[0]?.c ?? 0;
+    deleteCount = rDeletes.rows[0]?.c ?? 0;
+  } catch {
+    assignCount = events.filter((e) => e.action === "assign").length;
+    createCount = events.filter((e) => e.action === "create").length;
+    deleteCount = events.filter((e) => e.action === "delete").length;
+  }
+
+  return {
+    data: events.slice((page - 1) * pageSize, page * pageSize),
+    meta: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+    counts: {
+      all: assignCount + createCount + deleteCount,
+      assign: assignCount,
+      create: createCount,
+      delete: deleteCount,
+    },
+  };
+}
+
 export { LEAD_STATUSES, LEAD_SOURCES, LEAD_PRIORITIES };

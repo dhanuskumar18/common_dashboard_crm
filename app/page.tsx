@@ -6,28 +6,23 @@ import {
   Users,
   ShieldCheck,
   Building2,
-  TrendingUp,
   Clock,
   Plus,
   Search,
   RefreshCw,
-  MoreVertical,
   Eye,
   CheckCircle2,
-  IndianRupee,
   LogOut,
   Menu,
   X,
   Layers,
   ArrowRight,
   Code,
-  Check,
   Trash2,
-  Sparkles,
   Inbox,
   AlertCircle,
-  ExternalLink,
-  ChevronDown
+  ChevronDown,
+  ClipboardList,
 } from "lucide-react";
 import { CRMTablePagination } from "@/components/ui/crm-table-pagination";
 import { TableDataLoader } from "@/components/ui/BouncingDots";
@@ -65,7 +60,6 @@ export default function DashboardPage() {
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showApiModal, setShowApiModal] = useState(false);
-  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null); // "bulk" | `${sourceKey}:${id}`
   const [busy, setBusy] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -334,6 +328,17 @@ export default function DashboardPage() {
               </button>
             ))}
           </div>
+
+          {/* Audit Logs nav link */}
+          <div className="pt-3 border-t border-zinc-900 mt-3">
+            <button
+              onClick={() => { setMobileDrawerOpen(false); router.push("/audit-logs"); }}
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold text-zinc-300 hover:bg-zinc-900 transition"
+            >
+              <ClipboardList className="w-4 h-4 shrink-0 text-blue-400" />
+              Audit Logs
+            </button>
+          </div>
         </nav>
 
         <div className="p-4 border-t border-zinc-900 bg-zinc-950 flex items-center justify-between">
@@ -457,16 +462,16 @@ export default function DashboardPage() {
             })}
           </div>
 
-          {/* Quick link to transfer history */}
+          {/* Audit Logs nav link */}
           <div className="pt-4 border-t border-zinc-900/90 mt-4">
             <button
-              onClick={() => setShowHistoryModal(true)}
-              title="Recent Assignments Log"
+              onClick={() => router.push("/audit-logs")}
+              title="Audit Logs"
               className={`w-full flex items-center ${sidebarOpen ? "px-3" : "justify-center p-2.5"} py-2 rounded-xl text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-900/80 transition`}
             >
               <span className="flex items-center gap-2.5">
-                <Sparkles className="w-4 h-4 shrink-0 text-amber-400" />
-                {sidebarOpen && <span>Assignment Activity</span>}
+                <ClipboardList className="w-4 h-4 shrink-0 text-blue-400" />
+                {sidebarOpen && <span>Audit Logs</span>}
               </span>
             </button>
           </div>
@@ -535,6 +540,15 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Audit Logs Button */}
+            <button
+              onClick={() => router.push("/audit-logs")}
+              className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white border border-slate-200 hover:border-blue-300 hover:text-blue-700 text-xs font-semibold text-slate-700 transition shadow-2xs cursor-pointer"
+            >
+              <ClipboardList className="w-3.5 h-3.5 text-blue-600" />
+              <span>Audit Logs</span>
+            </button>
+
             {/* API Ingestion Guide Button */}
             <button
               onClick={() => setShowApiModal(true)}
@@ -1255,16 +1269,6 @@ export default function DashboardPage() {
         <ApiIngestionModal onClose={() => setShowApiModal(false)} />
       )}
 
-      {/* ========================================================================= */}
-      {/* ASSIGNMENT LOGS MODAL */}
-      {/* ========================================================================= */}
-      {showHistoryModal && (
-        <AssignmentHistoryModal
-          transfers={stats?.transfers ?? []}
-          onClose={() => setShowHistoryModal(false)}
-        />
-      )}
-
       {/* Toast Notification Container */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none">
         {toasts.map((t) => (
@@ -1597,84 +1601,4 @@ Body:
   );
 }
 
-/* ========================================================================= */
-/* ASSIGNMENT HISTORY MODAL */
-/* ========================================================================= */
-function AssignmentHistoryModal({
-  transfers,
-  onClose,
-}: {
-  transfers: { id: string; leadName: string; from: string; to: string; movedBy: string; movedAt: string }[];
-  onClose: () => void;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200 max-h-[85vh] flex flex-col"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-zinc-950 text-white">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-amber-500 text-zinc-950 font-black flex items-center justify-center">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-white tracking-tight">Recent Lead Distribution Logs</h2>
-              <p className="text-[11px] text-zinc-400">Audit trail of cross-company moves and assignments</p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg transition cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-2">
-          {transfers.length === 0 ? (
-            <div className="py-12 text-center text-slate-400 text-xs font-medium">
-              No assignments recorded yet. Leads moved from the dashboard will appear here.
-            </div>
-          ) : (
-            transfers.map((t) => (
-              <div
-                key={t.id}
-                className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-between gap-3 text-xs"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 font-bold flex items-center justify-center shrink-0">
-                    <ArrowRight className="w-4 h-4" />
-                  </div>
-                  <div className="truncate">
-                    <span className="font-bold text-slate-800 block truncate">{t.leadName}</span>
-                    <span className="text-[11px] text-slate-400">
-                      {t.from} → <strong className="text-slate-700">{t.to}</strong>
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-right shrink-0">
-                  <span className="text-[11px] text-slate-500 block font-medium">{t.movedBy}</span>
-                  <span className="text-[10px] text-slate-400 font-mono">{when(t.movedAt)}</span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-zinc-950 text-xs font-bold transition cursor-pointer shadow-xs"
-          >
-            Close
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}

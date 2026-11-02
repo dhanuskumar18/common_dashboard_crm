@@ -59,4 +59,21 @@ export interface StatsResp {
   transfers: Transfer[];
 }
 
+export interface AuditLog {
+  id: string;
+  action: "assign" | "create" | "delete";
+  leadName: string;
+  fromCompany: string | null;
+  toCompany: string | null;
+  actor: string;
+  timestamp: string;
+  meta: string | null;
+}
+
+export interface AuditLogsResp {
+  data: AuditLog[];
+  meta: { page: number; pageSize: number; total: number; totalPages: number };
+  counts: { all: number; assign: number; create: number; delete: number };
+}
+
 export type ApiFn = (url: string, init?: RequestInit) => Promise<any>; // eslint-disable-line @typescript-eslint/no-explicit-any
