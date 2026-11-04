@@ -4,6 +4,7 @@ import { getPool } from "./db";
 import {
   Company,
   CompanyKey,
+  DbKey,
   POOL_KEY,
   getCompanies,
   getCompany,
@@ -181,9 +182,43 @@ export interface ListParams {
 
 const PER_SOURCE_CAP = 3000;
 
+const tenantCache = new Map<string, string>();
+
+export async function resolveTenantId(db: DbKey, configuredTenantId: string): Promise<string> {
+  const cacheKey = `${db}:${configuredTenantId}`;
+  if (tenantCache.has(cacheKey)) return tenantCache.get(cacheKey)!;
+
+  try {
+    const pool = getPool(db);
+    if (configuredTenantId && configuredTenantId !== "default-tenant-id") {
+      const res = await pool.query(
+        `SELECT id FROM tenants WHERE id = $1 AND "deletedAt" IS NULL LIMIT 1`,
+        [configuredTenantId],
+      );
+      if (res.rows[0]) {
+        tenantCache.set(cacheKey, res.rows[0].id);
+        return res.rows[0].id;
+      }
+    }
+
+    const first = await pool.query(
+      `SELECT id FROM tenants WHERE "deletedAt" IS NULL ORDER BY "createdAt" ASC LIMIT 1`,
+    );
+    if (first.rows[0]) {
+      tenantCache.set(cacheKey, first.rows[0].id);
+      return first.rows[0].id;
+    }
+  } catch (err) {
+    console.warn(`[resolveTenantId] Error resolving tenant in db "${db}":`, (err as Error).message);
+  }
+
+  return configuredTenantId;
+}
+
 async function listCompany(c: Company, p: ListParams): Promise<HubLead[]> {
+  const tenantId = await resolveTenantId(c.db, c.tenantId);
   const where = [`"tenantId" = $1`, `"deletedAt" IS NULL`];
-  const args: unknown[] = [c.tenantId];
+  const args: unknown[] = [tenantId];
   if (p.status && p.status !== "all") {
     args.push(p.status);
     where.push(`status = $${args.length}::"LeadStatus"`);
@@ -272,10 +307,11 @@ export async function getStats() {
   const companies = await Promise.all(
     getCompanies().map(async (c) => {
       try {
+        const tenantId = await resolveTenantId(c.db, c.tenantId);
         const res = await getPool(c.db).query(
           `SELECT status::text AS status, COUNT(*)::int AS n, COALESCE(SUM("estimatedValue"),0)::float AS value
              FROM leads WHERE "tenantId" = $1 AND "deletedAt" IS NULL GROUP BY status`,
-          [c.tenantId],
+          [tenantId],
         );
         const byStatus: Record<string, number> = {};
         let total = 0;
@@ -402,10 +438,11 @@ async function loadSource(sourceKey: string, id: string): Promise<{ lead: Source
   }
   const c = getCompany(sourceKey);
   if (!c) throw new Error(`Unknown source "${sourceKey}"`);
+  const tenantId = await resolveTenantId(c.db, c.tenantId);
   const r = await getPool(c.db).query(
     `SELECT *, source::text AS source, status::text AS status, priority::text AS priority
        FROM leads WHERE id=$1 AND "tenantId"=$2 AND "deletedAt" IS NULL`,
-    [id, c.tenantId],
+    [id, tenantId],
   );
   if (!r.rows[0]) throw new Error("Lead not found in " + c.label);
   const x = r.rows[0];
@@ -450,6 +487,8 @@ export async function assignLead(
     if (!target) throw new Error(`Unknown target company "${targetKey}"`);
     await ensureHub();
 
+    const targetTenantId = await resolveTenantId(target.db, target.tenantId);
+
     const { lead, label: fromLabel } = await loadSource(sourceKey, id);
     const stamp = new Date().toISOString().slice(0, 10);
     const trail = `[Moved from ${fromLabel} via Common Dashboard on ${stamp}]`;
@@ -471,7 +510,7 @@ export async function assignLead(
             $17::"LeadPriority",$18,$19,$20,$21,$22,$23,$24,$25,$26,now())`,
         [
           newId,
-          target.tenantId,
+          targetTenantId,
           newCode,
           lead.firstName,
           lead.lastName || "-",
@@ -518,16 +557,17 @@ export async function assignLead(
         );
       } else {
         const src = getCompany(sourceKey)!;
+        const srcTenantId = await resolveTenantId(src.db, src.tenantId);
         await getPool(src.db).query(
           `UPDATE leads SET "deletedAt"=now(), "deletedBy"=$3, "updatedAt"=now(),
                  notes = CASE WHEN notes IS NULL OR notes='' THEN $4 ELSE notes || E'\\n' || $4 END
             WHERE id=$1 AND "tenantId"=$2`,
-          [id, src.tenantId, `common-dashboard:${actor}`, movedNote],
+          [id, srcTenantId, `common-dashboard:${actor}`, movedNote],
         );
       }
     } catch (e) {
       await getPool(target.db)
-        .query(`DELETE FROM leads WHERE id=$1 AND "tenantId"=$2`, [newId, target.tenantId])
+        .query(`DELETE FROM leads WHERE id=$1 AND "tenantId"=$2`, [newId, targetTenantId])
         .catch(() => {});
       throw e;
     }

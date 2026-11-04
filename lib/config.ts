@@ -13,6 +13,12 @@ export interface Company {
 export const POOL_KEY = "unassigned" as const;
 
 export function getCompanies(): Company[] {
+  const nongstEnv = process.env.NONGST_TENANT_ID;
+  const nongstTenantId =
+    nongstEnv && nongstEnv !== "default-tenant-id"
+      ? nongstEnv
+      : "6e66fd13-2abb-4407-ab35-9412a1589985";
+
   return [
     {
       key: "gst_webnox",
@@ -35,7 +41,7 @@ export function getCompanies(): Company[] {
       label: "Webnox Non-GST",
       group: "Non-GST",
       db: "nongst",
-      tenantId: process.env.NONGST_TENANT_ID || "default-tenant-id",
+      tenantId: nongstTenantId,
       color: "#f59e0b",
     },
   ];
